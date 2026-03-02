@@ -4,8 +4,6 @@ from typing import List, Optional
 
 app = FastAPI(title="Transaction Order Service")
 
-password = "ABCD123456"
-
 # Model untuk Transaction Order 
 class TransactionOrder(BaseModel):
     id: Optional[int] = None
