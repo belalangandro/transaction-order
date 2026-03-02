@@ -8,7 +8,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 QWEN_API_KEY = os.getenv("QWEN_API_KEY")
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 PR_NUMBER = os.getenv("PR_NUMBER")
-QWEN_MODEL = "qwen-turbo"  # Bisa diganti qwen-plus, qwen-max
+QWEN_MODEL = "qwen-max"  # Bisa diganti qwen-plus, qwen-max
 
 def get_pr_diff():
     """Mengambil detail file yang berubah di PR"""
@@ -96,7 +96,7 @@ def call_qwen_api(code_context):
     
     # Format OpenAI-compatible (bukan native DashScope)
     payload = {
-        "model": "qwen-turbo",  # atau qwen-plus, qwen-max
+        "model": "qwen-max",  # atau qwen-plus, qwen-max
         "messages": [
             {"role": "system", "content": "You are a helpful code review assistant."},
             {"role": "user", "content": prompt}
