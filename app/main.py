@@ -4,7 +4,7 @@ from typing import List, Optional
 
 app = FastAPI(title="Transaction Order Service")
 
-# Model untuk Transaction Order
+# Model untuk Transaction Order 
 class TransactionOrder(BaseModel):
     id: Optional[int] = None
     customer_id: int
