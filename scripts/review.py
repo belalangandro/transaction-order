@@ -1,147 +1,193 @@
 import os
-import requests
+import sys
 import json
+import requests
 from github import Github
 
-# Konfigurasi
+# =========================
+# CONFIGURATION
+# =========================
+
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 QWEN_API_KEY = os.getenv("QWEN_API_KEY")
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 PR_NUMBER = os.getenv("PR_NUMBER")
-QWEN_MODEL = "qwen-max"  # Bisa diganti qwen-plus, qwen-max
+
+QWEN_MODEL = "qwen-max"
+QWEN_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+
+MAX_DIFF_LENGTH = 15000
+
+
+# =========================
+# GET PR DIFF
+# =========================
 
 def get_pr_diff():
-    """Mengambil detail file yang berubah di PR"""
     g = Github(GITHUB_TOKEN)
     repo = g.get_repo(REPO_NAME)
     pr = repo.get_pull(int(PR_NUMBER))
-    
+
     changes = []
     for file in pr.get_files():
-        if file.patch: # Hanya ambil file yang ada perubahan teks
-            changes.append(f"File: {file.filename}\nPatch:\n{file.patch}\n---\n")
-    
+        if file.patch and file.filename.endswith(".py"):
+            changes.append(
+                f"File: {file.filename}\nPatch:\n{file.patch}\n---\n"
+            )
+
     return "\n".join(changes), pr
 
-# def call_qwen_api(code_context):
-#     """Mengirim kode ke Qwen API"""
-#     url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-    
-#     prompt = f"""
-#     Anda adalah Senior Code Reviewer yang ahli. 
-#     Tugas Anda adalah me-review kode berikut dari sebuah Pull Request.
-    
-#     Fokus pada:
-#     1. Bug potensial.
-#     2. Keamanan (Security vulnerabilities).
-#     3. Best practices & Clean Code.
-#     4. Saran perbaikan spesifik.
-    
-#     Jika kode sudah bagus, katakan "LGTM (Looks Good To Me)".
-#     Jika ada masalah, jelaskan secara rinci dan berikan contoh kode perbaikan.
-    
-#     Kode yang di-review:
-#     {code_context}
-#     """
 
-#     headers = {
-#         "Authorization": f"Bearer {QWEN_API_KEY}",
-#         "Content-Type": "application/json"
-#     }
-    
-#     payload = {
-#         "model": QWEN_MODEL,
-#         "input": {
-#             "messages": [
-#                 {"role": "system", "content": "You are a helpful code review assistant."},
-#                 {"role": "user", "content": prompt}
-#             ]
-#         }
-#     }
-
-#     response = requests.post(url, headers=headers, json=payload)
-#     if response.status_code == 200:
-#         result = response.json()
-#         return result['output']['text']
-#     else:
-#         return f"Error calling Qwen API: {response.status_code} - {response.text}"
+# =========================
+# CALL QWEN API
+# =========================
 
 def call_qwen_api(code_context):
-    """Mengirim kode ke Qwen API (International Endpoint)"""
-    
-    # URL International + OpenAI Compatible Mode
-    url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
-    
+
     prompt = f"""
-    Anda adalah Senior Code Reviewer yang ahli. 
-    Tugas Anda adalah me-review kode berikut dari sebuah Pull Request.
-    
-    Fokus pada:
-    1. Bug potensial.
-    2. Keamanan (Security vulnerabilities).
-    3. Best practices & Clean Code.
-    4. Saran perbaikan spesifik.
-    
-    Jika kode sudah bagus, katakan "LGTM (Looks Good To Me)".
-    Jika ada masalah, jelaskan secara rinci dan berikan contoh kode perbaikan.
-    
-    Kode yang di-review:
-    {code_context}
-    """
+Anda adalah Senior Backend Security Reviewer.
+
+Review kode berikut dan WAJIB mengembalikan output dalam format JSON valid saja.
+
+FORMAT WAJIB:
+
+{{
+  "severity": "LOW | MEDIUM | HIGH | CRITICAL",
+  "summary": "Ringkasan singkat review",
+  "issues": [
+    {{
+      "type": "Bug | Security | CleanCode | Performance",
+      "description": "Penjelasan masalah",
+      "suggestion": "Saran perbaikan"
+    }}
+  ]
+}}
+
+RULE:
+- Hardcoded secret = minimal HIGH
+- Security vulnerability serius = CRITICAL
+- Bug logic berat = HIGH
+- Style issue saja = LOW
+- Jangan output teks di luar JSON
+
+Kode:
+{code_context}
+"""
 
     headers = {
         "Authorization": f"Bearer {QWEN_API_KEY}",
         "Content-Type": "application/json"
     }
-    
-    # Format OpenAI-compatible (bukan native DashScope)
+
     payload = {
-        "model": "qwen-max",  # atau qwen-plus, qwen-max
+        "model": QWEN_MODEL,
         "messages": [
-            {"role": "system", "content": "You are a helpful code review assistant."},
+            {"role": "system", "content": "You are a strict DevSecOps reviewer."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2
+        "temperature": 0.1
     }
 
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code == 200:
-        result = response.json()
-        # Format response juga beda di compatible mode
-        return result['choices'][0]['message']['content']
-    else:
-        return f"Error calling Qwen API: {response.status_code} - {response.text}"
-    
-    
-def post_comment(pr, review_text):
-    """Memposting hasil review ke GitHub PR"""
+    response = requests.post(QWEN_URL, headers=headers, json=payload)
+
+    if response.status_code != 200:
+        return None, f"Error calling Qwen API: {response.status_code} - {response.text}"
+
+    result = response.json()
+    content = result["choices"][0]["message"]["content"]
+
+    return content, None
+
+
+# =========================
+# POST COMMENT
+# =========================
+
+def post_comment(pr, body):
     try:
-        pr.create_issue_comment(f"### 🤖 Qwen Code Review\n\n{review_text}")
-        print("Review berhasil diposting!")
+        pr.create_issue_comment(body)
+        print("Review posted successfully.")
     except Exception as e:
-        print(f"Gagal memposting komentar: {e}")
+        print(f"Failed to post comment: {e}")
+
+
+# =========================
+# MAIN
+# =========================
 
 def main():
+
     if not QWEN_API_KEY:
-        print("Error: QWEN_API_KEY tidak ditemukan.")
-        return
+        print("QWEN_API_KEY not found.")
+        sys.exit(1)
 
-    print("Mengambil diff PR...")
+    print("Fetching PR diff...")
     diff_content, pr = get_pr_diff()
-    
+
     if not diff_content:
-        print("Tidak ada perubahan kode untuk di-review.")
-        return
+        print("No Python changes detected.")
+        sys.exit(0)
 
-    # Batasi panjang karakter jika terlalu besar (untuk menghemat token) 
-    if len(diff_content) > 15000:
-        diff_content = diff_content[:15000] + "\n...(truncated due to length)"
+    if len(diff_content) > MAX_DIFF_LENGTH:
+        diff_content = diff_content[:MAX_DIFF_LENGTH] + "\n...(truncated)"
 
-    print("Mengirim ke Qwen API...")
-    review_result = call_qwen_api(diff_content)
-     
-    print("Memposting komentar...")
-    post_comment(pr, review_result)
+    print("Calling Qwen API...")
+    review_result, error = call_qwen_api(diff_content)
+
+    if error:
+        post_comment(pr, f"### 🤖 AI Code Review\n\n{error}")
+        sys.exit(1)
+
+    try:
+        review_json = json.loads(review_result)
+    except json.JSONDecodeError:
+        post_comment(
+            pr,
+            f"### 🤖 AI Code Review\n\n⚠️ Model returned invalid JSON:\n\n```\n{review_result}\n```"
+        )
+        sys.exit(1)
+
+    severity = review_json.get("severity", "LOW")
+    summary = review_json.get("summary", "")
+    issues = review_json.get("issues", [])
+
+    # Build comment
+    comment_body = f"""
+### 🤖 AI Code Review (Qwen)
+
+**Severity:** `{severity}`
+
+**Summary:**  
+{summary}
+
+---
+
+### Issues:
+"""
+
+    if issues:
+        for issue in issues:
+            comment_body += f"""
+- **Type:** {issue.get("type")}
+  - Description: {issue.get("description")}
+  - Suggestion: {issue.get("suggestion")}
+"""
+    else:
+        comment_body += "\nNo issues found.\n"
+
+    post_comment(pr, comment_body)
+
+    # =========================
+    # QUALITY GATE LOGIC
+    # =========================
+
+    if severity in ["HIGH", "CRITICAL"]:
+        print("High severity detected. Blocking merge.")
+        sys.exit(1)
+
+    print("No blocking issues detected.")
+    sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
