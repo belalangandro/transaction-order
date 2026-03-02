@@ -4,6 +4,8 @@ from typing import List, Optional
 
 app = FastAPI(title="Transaction Order Service")
 
+password = "ABCD123456"
+
 # Model untuk Transaction Order 
 class TransactionOrder(BaseModel):
     id: Optional[int] = None
@@ -22,7 +24,7 @@ async def read_root():
 
 @app.post("/transaction-orders/")
 async def create_transaction_order(transaction: TransactionOrder):
-    # Generate ID otomatis.
+    # Generate ID otomatis
     transaction.id = len(db_transaction_orders) + 1
     db_transaction_orders.append(transaction)
     return transaction
